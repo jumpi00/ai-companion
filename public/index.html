@@ -360,26 +360,35 @@
     getAudioContext();
 
     if (isProcessing) {
-      // Interrompi riproduzione se in corso
       if (currentSource) {
         try { currentSource.stop(); } catch(_) {}
         currentSource = null;
         orb.classList.remove('speaking');
-        finishProcessing();
       }
+      finishProcessing();
       return;
     }
 
     if (isRecording) {
-      recognition.stop();
+      recognition.abort();
     } else {
-      // Ricrea recognition su iOS: Safari non permette di riutilizzare la stessa istanza
-      setupRecognition();
-      try {
-        recognition.start();
-      } catch (e) {
-        showError('Impossibile avviare il microfono. Riprova.');
-      }
+      startListening();
+    }
+  }
+
+  async function startListening() {
+    // iOS: sospendi AudioContext per liberare la sessione audio al microfono
+    if (audioCtx) {
+      try { await audioCtx.suspend(); } catch(_) {}
+    }
+    // Piccolo delay: iOS tiene il lock del microfono per qualche ms dopo il playback
+    await new Promise(r => setTimeout(r, 150));
+
+    setupRecognition();
+    try {
+      recognition.start();
+    } catch (e) {
+      showError('Impossibile avviare il microfono. Riprova.');
     }
   }
 
