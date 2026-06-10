@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>AI Companion</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --surface: #13131a;
+      --border: #1e1e2e;
+      --accent: #7c6ff7;
+      --accent-glow: #7c6ff740;
+      --text: #e8e8f0;
+      --text-dim: #6b6b80;
+      --red: #ff4757;
+      --green: #2ed573;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      overflow: hidden;
+    }
+
+    .app {
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 2rem 1.5rem;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+    }
+
+    .header h1 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-dim);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .reset-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 0.35rem 0.75rem;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .reset-btn:active { opacity: 0.6; }
+
+    /* Orb / visualizer */
+    .orb-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .orb {
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 40% 35%, #9b8fff, #5a4fcf 60%, #2a2060);
+      box-shadow: 0 0 40px var(--accent-glow);
+      position: relative;
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .orb::before {
+      content: '';
+      position: absolute;
+      inset: 6px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.15), transparent 60%);
+    }
+
+    .orb.listening {
+      animation: pulse-listen 1.2s ease-in-out infinite;
+      box-shadow: 0 0 60px var(--accent-glow), 0 0 100px #5a4fcf30;
+    }
+
+    .orb.speaking {
+      animation: pulse-speak 0.8s ease-in-out infinite;
+      box-shadow: 0 0 80px #7c6ff760, 0 0 140px #5a4fcf40;
+    }
+
+    .orb.thinking {
+      animation: spin-slow 3s linear infinite;
+      opacity: 0.8;
+    }
+
+    @keyframes pulse-listen {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.07); }
+    }
+
+    @keyframes pulse-speak {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.12); }
+    }
+
+    @keyframes spin-slow {
+      from { filter: hue-rotate(0deg); }
+      to { filter: hue-rotate(360deg); }
+    }
+
+    /* Status text */
+    .status-area {
+      width: 100%;
+      text-align: center;
+      min-height: 5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .status-label {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      min-height: 1em;
+    }
+
+    .transcript {
+      font-size: 1rem;
+      color: var(--text);
+      line-height: 1.5;
+      max-height: 4.5rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+    }
+
+    .reply-text {
+      font-size: 0.9rem;
+      color: var(--accent);
+      line-height: 1.5;
+      max-height: 5rem;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+    }
+
+    /* Mic button */
+    .controls {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.25rem;
+    }
+
+    .mic-btn {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      border: none;
+      background: var(--surface);
+      border: 2px solid var(--border);
+      color: var(--text);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    .mic-btn:active { transform: scale(0.93); }
+
+    .mic-btn.recording {
+      background: var(--red);
+      border-color: var(--red);
+      box-shadow: 0 0 30px #ff475750;
+    }
+
+    .mic-btn.disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    .mic-icon {
+      width: 28px;
+      height: 28px;
+      fill: currentColor;
+    }
+
+    .hint {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    /* Error toast */
+    .error-toast {
+      display: none;
+      position: fixed;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--red);
+      color: white;
+      padding: 0.6rem 1.2rem;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      z-index: 100;
+      max-width: 90vw;
+      text-align: center;
+    }
+    .error-toast.show { display: block; }
+  </style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <h1>AI Companion</h1>
+    <button class="reset-btn" onclick="resetConversation()">Nuova chat</button>
+  </div>
+
+  <div class="orb-container">
+    <div class="orb" id="orb"></div>
+  </div>
+
+  <div class="status-area">
+    <div class="status-label" id="statusLabel">Premi per parlare</div>
+    <div class="transcript" id="transcript"></div>
+    <div class="reply-text" id="replyText"></div>
+  </div>
+
+  <div class="controls">
+    <button class="mic-btn" id="micBtn" onclick="handleMicClick()">
+      <svg class="mic-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v7a2 2 0 0 0 4 0V5a2 2 0 0 0-2-2zm-1 17.93V23h2v-2.07A8.001 8.001 0 0 0 20 13h-2a6 6 0 0 1-12 0H4a8.001 8.001 0 0 0 7 7.93z"/>
+      </svg>
+    </button>
+    <div class="hint" id="hint">Tocca il microfono per iniziare</div>
+  </div>
+</div>
+
+<div class="error-toast" id="errorToast"></div>
+
+<script>
+  const SESSION_ID = Math.random().toString(36).slice(2);
+
+  let recognition = null;
+  let isRecording = false;
+  let isProcessing = false;
+  let currentAudio = null;
+
+  const orb = document.getElementById('orb');
+  const micBtn = document.getElementById('micBtn');
+  const statusLabel = document.getElementById('statusLabel');
+  const transcript = document.getElementById('transcript');
+  const replyText = document.getElementById('replyText');
+  const hint = document.getElementById('hint');
+
+  // Setup Web Speech API
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    setStatus('error', 'Microfono non supportato su questo browser');
+    micBtn.classList.add('disabled');
+  } else {
+    recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = 'it-IT';
+
+    recognition.onstart = () => {
+      isRecording = true;
+      setStatus('listening', 'In ascolto...');
+      micBtn.classList.add('recording');
+      orb.classList.add('listening');
+      transcript.textContent = '';
+      replyText.textContent = '';
+      hint.textContent = 'Tocca di nuovo per fermare';
+    };
+
+    recognition.onresult = (e) => {
+      let interim = '';
+      let final = '';
+      for (const result of e.results) {
+        if (result.isFinal) final += result[0].transcript;
+        else interim += result[0].transcript;
+      }
+      transcript.textContent = final || interim;
+    };
+
+    recognition.onend = () => {
+      isRecording = false;
+      micBtn.classList.remove('recording');
+      orb.classList.remove('listening');
+      const text = transcript.textContent.trim();
+      if (text && !isProcessing) {
+        sendMessage(text);
+      } else if (!isProcessing) {
+        setStatus('idle', 'Premi per parlare');
+        hint.textContent = 'Tocca il microfono per iniziare';
+      }
+    };
+
+    recognition.onerror = (e) => {
+      isRecording = false;
+      micBtn.classList.remove('recording');
+      orb.classList.remove('listening');
+      if (e.error === 'no-speech') {
+        setStatus('idle', 'Nessun audio rilevato');
+      } else if (e.error === 'not-allowed') {
+        showError('Accesso al microfono negato. Controlla i permessi.');
+      } else {
+        showError(`Errore microfono: ${e.error}`);
+      }
+      hint.textContent = 'Tocca il microfono per iniziare';
+    };
+  }
+
+  function handleMicClick() {
+    if (isProcessing) return;
+
+    if (currentAudio && !currentAudio.ended) {
+      currentAudio.pause();
+      currentAudio = null;
+      orb.classList.remove('speaking');
+    }
+
+    if (isRecording) {
+      recognition.stop();
+    } else {
+      try {
+        recognition.start();
+      } catch (e) {
+        // already started
+      }
+    }
+  }
+
+  async function sendMessage(text) {
+    isProcessing = true;
+    micBtn.classList.add('disabled');
+    setStatus('thinking', 'Sto pensando...');
+    orb.classList.add('thinking');
+    hint.textContent = 'Attendere...';
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, sessionId: SESSION_ID }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || 'Errore server');
+
+      orb.classList.remove('thinking');
+      replyText.textContent = data.reply;
+
+      if (data.audio) {
+        playAudio(data.audio);
+      } else {
+        setStatus('idle', 'Risposta ricevuta');
+        finishProcessing();
+      }
+    } catch (err) {
+      orb.classList.remove('thinking');
+      showError(err.message);
+      finishProcessing();
+    }
+  }
+
+  function playAudio(base64) {
+    setStatus('speaking', 'Risposta in corso...');
+    orb.classList.add('speaking');
+    hint.textContent = 'Tocca per interrompere';
+
+    const audio = new Audio(`data:audio/mpeg;base64,${base64}`);
+    currentAudio = audio;
+
+    audio.onended = () => {
+      orb.classList.remove('speaking');
+      finishProcessing();
+    };
+
+    audio.onerror = () => {
+      orb.classList.remove('speaking');
+      showError('Errore riproduzione audio');
+      finishProcessing();
+    };
+
+    audio.play().catch(() => {
+      // Autoplay blocked — show tap-to-play
+      setStatus('idle', 'Tocca per ascoltare la risposta');
+      orb.classList.remove('speaking');
+      micBtn.classList.remove('disabled');
+      micBtn.onclick = () => {
+        audio.play();
+        micBtn.onclick = handleMicClick;
+        setStatus('speaking', 'Risposta in corso...');
+        orb.classList.add('speaking');
+      };
+      return;
+    });
+  }
+
+  function finishProcessing() {
+    isProcessing = false;
+    micBtn.classList.remove('disabled');
+    micBtn.onclick = handleMicClick;
+    setStatus('idle', 'Premi per parlare');
+    hint.textContent = 'Tocca il microfono per iniziare';
+  }
+
+  function setStatus(state, label) {
+    statusLabel.textContent = label;
+  }
+
+  function showError(msg) {
+    const toast = document.getElementById('errorToast');
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 4000);
+    setStatus('idle', 'Premi per parlare');
+    hint.textContent = 'Tocca il microfono per iniziare';
+  }
+
+  function resetConversation() {
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+    if (isRecording) recognition.stop();
+    orb.className = 'orb';
+    transcript.textContent = '';
+    replyText.textContent = '';
+    fetch('/api/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: SESSION_ID }),
+    });
+    finishProcessing();
+  }
+</script>
+</body>
+</html>
