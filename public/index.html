@@ -270,7 +270,18 @@
   let recognition = null;
   let isRecording = false;
   let isProcessing = false;
-  let currentAudio = null;
+  let currentSource = null;
+
+  // Web Audio API — unlocked on first tap (required by iOS Safari)
+  let audioCtx = null;
+
+  function getAudioContext() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
 
   const orb = document.getElementById('orb');
   const micBtn = document.getElementById('micBtn');
@@ -279,13 +290,16 @@
   const replyText = document.getElementById('replyText');
   const hint = document.getElementById('hint');
 
-  // Setup Web Speech API
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   if (!SpeechRecognition) {
-    setStatus('error', 'Microfono non supportato su questo browser');
+    statusLabel.textContent = 'Microfono non supportato';
     micBtn.classList.add('disabled');
   } else {
+    setupRecognition();
+  }
+
+  function setupRecognition() {
     recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = true;
@@ -293,7 +307,7 @@
 
     recognition.onstart = () => {
       isRecording = true;
-      setStatus('listening', 'In ascolto...');
+      statusLabel.textContent = 'In ascolto...';
       micBtn.classList.add('recording');
       orb.classList.add('listening');
       transcript.textContent = '';
@@ -319,7 +333,7 @@
       if (text && !isProcessing) {
         sendMessage(text);
       } else if (!isProcessing) {
-        setStatus('idle', 'Premi per parlare');
+        statusLabel.textContent = 'Premi per parlare';
         hint.textContent = 'Tocca il microfono per iniziare';
       }
     };
@@ -328,43 +342,53 @@
       isRecording = false;
       micBtn.classList.remove('recording');
       orb.classList.remove('listening');
-      if (e.error === 'no-speech') {
-        setStatus('idle', 'Nessun audio rilevato');
-      } else if (e.error === 'not-allowed') {
-        showError('Accesso al microfono negato. Controlla i permessi.');
-      } else {
+      // iOS spesso lancia 'no-speech' o 'aborted' — non mostrare errore se c'è già testo
+      if (e.error === 'not-allowed') {
+        showError('Accesso al microfono negato. Controlla i permessi in Impostazioni.');
+      } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
         showError(`Errore microfono: ${e.error}`);
       }
-      hint.textContent = 'Tocca il microfono per iniziare';
+      if (!isProcessing) {
+        statusLabel.textContent = 'Premi per parlare';
+        hint.textContent = 'Tocca il microfono per iniziare';
+      }
     };
   }
 
   function handleMicClick() {
-    if (isProcessing) return;
+    // Unlock iOS audio context on every tap (must happen inside user gesture)
+    getAudioContext();
 
-    if (currentAudio && !currentAudio.ended) {
-      currentAudio.pause();
-      currentAudio = null;
-      orb.classList.remove('speaking');
+    if (isProcessing) {
+      // Interrompi riproduzione se in corso
+      if (currentSource) {
+        try { currentSource.stop(); } catch(_) {}
+        currentSource = null;
+        orb.classList.remove('speaking');
+        finishProcessing();
+      }
+      return;
     }
 
     if (isRecording) {
       recognition.stop();
     } else {
+      // Ricrea recognition su iOS: Safari non permette di riutilizzare la stessa istanza
+      setupRecognition();
       try {
         recognition.start();
       } catch (e) {
-        // already started
+        showError('Impossibile avviare il microfono. Riprova.');
       }
     }
   }
 
   async function sendMessage(text) {
     isProcessing = true;
-    micBtn.classList.add('disabled');
-    setStatus('thinking', 'Sto pensando...');
+    micBtn.classList.remove('disabled');
+    statusLabel.textContent = 'Sto pensando...';
     orb.classList.add('thinking');
-    hint.textContent = 'Attendere...';
+    hint.textContent = 'Tocca per interrompere';
 
     try {
       const res = await fetch('/api/chat', {
@@ -374,69 +398,60 @@
       });
 
       const data = await res.json();
-
       if (!res.ok) throw new Error(data.error || 'Errore server');
 
       orb.classList.remove('thinking');
       replyText.textContent = data.reply;
 
       if (data.audio) {
-        playAudio(data.audio);
-      } else {
-        setStatus('idle', 'Risposta ricevuta');
-        finishProcessing();
+        await playAudio(data.audio);
       }
     } catch (err) {
       orb.classList.remove('thinking');
       showError(err.message);
-      finishProcessing();
     }
+    finishProcessing();
   }
 
-  function playAudio(base64) {
-    setStatus('speaking', 'Risposta in corso...');
+  async function playAudio(base64) {
+    statusLabel.textContent = 'Risposta in corso...';
     orb.classList.add('speaking');
     hint.textContent = 'Tocca per interrompere';
 
-    const audio = new Audio(`data:audio/mpeg;base64,${base64}`);
-    currentAudio = audio;
+    try {
+      const ctx = getAudioContext();
 
-    audio.onended = () => {
-      orb.classList.remove('speaking');
-      finishProcessing();
-    };
+      // Decodifica base64 → ArrayBuffer
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
-    audio.onerror = () => {
-      orb.classList.remove('speaking');
-      showError('Errore riproduzione audio');
-      finishProcessing();
-    };
+      const audioBuffer = await ctx.decodeAudioData(bytes.buffer);
 
-    audio.play().catch(() => {
-      // Autoplay blocked — show tap-to-play
-      setStatus('idle', 'Tocca per ascoltare la risposta');
-      orb.classList.remove('speaking');
-      micBtn.classList.remove('disabled');
-      micBtn.onclick = () => {
-        audio.play();
-        micBtn.onclick = handleMicClick;
-        setStatus('speaking', 'Risposta in corso...');
-        orb.classList.add('speaking');
-      };
-      return;
-    });
+      await new Promise((resolve) => {
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(ctx.destination);
+        currentSource = source;
+        source.onended = () => {
+          currentSource = null;
+          resolve();
+        };
+        source.start(0);
+      });
+    } catch (err) {
+      showError('Errore audio: ' + err.message);
+    }
+
+    orb.classList.remove('speaking');
   }
 
   function finishProcessing() {
     isProcessing = false;
+    currentSource = null;
     micBtn.classList.remove('disabled');
-    micBtn.onclick = handleMicClick;
-    setStatus('idle', 'Premi per parlare');
+    statusLabel.textContent = 'Premi per parlare';
     hint.textContent = 'Tocca il microfono per iniziare';
-  }
-
-  function setStatus(state, label) {
-    statusLabel.textContent = label;
   }
 
   function showError(msg) {
@@ -444,12 +459,10 @@
     toast.textContent = msg;
     toast.classList.add('show');
     setTimeout(() => toast.classList.remove('show'), 4000);
-    setStatus('idle', 'Premi per parlare');
-    hint.textContent = 'Tocca il microfono per iniziare';
   }
 
   function resetConversation() {
-    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+    if (currentSource) { try { currentSource.stop(); } catch(_) {} currentSource = null; }
     if (isRecording) recognition.stop();
     orb.className = 'orb';
     transcript.textContent = '';
